@@ -10,17 +10,23 @@
 ---
 
 A [Home Assistant](https://www.home-assistant.io/) integration for the
-**Xiaomi Robot Vacuum X20 Max** (`xiaomi.vacuum.d109gl`) and **Xiaomi Robot
-Vacuum S20+** (`xiaomi.vacuum.b108gl`).
+**Xiaomi Robot Vacuum X20 Max** (`xiaomi.vacuum.d109gl`), **Xiaomi Robot
+Vacuum S20+** (`xiaomi.vacuum.b108gl`) and **Xiaomi Robot Vacuum S40 Pro**
+(`xiaomi.vacuum.ov71gl`).
 
 Day-to-day control and state polling run **locally** over the MIoT protocol
 (`iot_class: local_polling`). The Xiaomi cloud is used for one-time setup —
 a QR login that discovers the vacuum and fetches its IP and token for you — and
 for two cloud-only extras: the **map image** and **localized error messages**.
 
-> Tested against `xiaomi.vacuum.d109gl` (X20 Max) and `xiaomi.vacuum.b108gl`
-> (S20+). Other Xiaomi vacuums matching the `xiaomi.vacuum.*` model prefix may
-> be discovered but aren't officially supported.
+> Tested against `xiaomi.vacuum.d109gl` (X20 Max), `xiaomi.vacuum.b108gl`
+> (S20+) and `xiaomi.vacuum.ov71gl` (S40 Pro). Other Xiaomi vacuums matching
+> the `xiaomi.vacuum.*` model prefix may be discovered but aren't officially
+> supported.
+>
+> The S40 Pro is an export-only model: it does not appear when the Xiaomi
+> cloud region is set to China. Pick the region your Mi Home account uses
+> (Europe for EU units).
 
 ## Features
 
@@ -39,14 +45,15 @@ for two cloud-only extras: the **map image** and **localized error messages**.
 - **Consumable life sensors** (% remaining): mop, main brush, side brush,
   filter — matching the Mi Home app's consumables list.
 - **Configuration selects** for: cleaning mode (sweep / mop / sweep+mop /
-  sweep before mopping), clean repetitions, mop water level. The X20 Max also
-  exposes sweep route (quick / standard / deep) and obstacle avoidance
-  strategy; the S20+ has no such properties and omits those selects.
-- **Empty dust bin** button (triggers the dock to collect the vacuum's dust).
+  sweep before mopping), clean repetitions, mop water level. The X20 Max and
+  S40 Pro also expose sweep route (quick / standard / deep) and obstacle
+  avoidance strategy; the S20+ has no such properties and omits those selects.
+- **Empty dust bin** button (triggers the dock to collect the vacuum's dust) —
+  X20 Max only; the S20+ and S40 Pro ship with a plain charging dock.
 - **`vacuum.send_command`** — a whitelist of extra MIoT actions (start mop,
   sweep+mop, continue sweep; and on the X20 Max, mop wash start/stop and dry
   start/stop). The mop-wash and dry actions target the X20 Max auto-wash dock
-  and are not available on the S20+.
+  and are not available on the S20+ or S40 Pro.
 - **Optimistic UI updates** — actions reflect immediately in the card; a
   background refresh confirms the device state ~5 s later.
 - **Internationalization**: English and Brazilian Portuguese (`pt-BR`).
@@ -119,14 +126,35 @@ text, and route the S20+ room clean through the cloud.
 | `binary_sensor.<name>_battery_charging` | `binary_sensor` | Whether the battery is charging |
 | `binary_sensor.<name>_mop_pad` | `binary_sensor` | Whether the mop pad is attached |
 | `select.<name>_mode` | `select` | Sweep / Mop / Sweep+Mop / Sweep before mopping |
-| `select.<name>_clean_times` | `select` | Once / Twice (X20 Max also: Three times) |
+| `select.<name>_clean_times` | `select` | Once / Twice (X20 Max and S40 Pro also: Three times) |
 | `select.<name>_mop_water_level` | `select` | Off / Level 1–3 |
-| `select.<name>_sweep_route` | `select` | Quick / Standard / Deep — X20 Max only |
-| `select.<name>_obstacle_avoidance` | `select` | Less collisions / High coverage — X20 Max only |
+| `select.<name>_sweep_route` | `select` | Quick / Standard / Deep — X20 Max and S40 Pro |
+| `select.<name>_obstacle_avoidance` | `select` | Less collisions / High coverage — X20 Max and S40 Pro |
 | `button.<name>_collect_dust` | `button` | Tells the dock to empty the dust bin — X20 Max only |
 
 The vacuum entity also exposes raw MIoT diagnostics as extra state attributes
 under the `xiaomi_vacuum` key.
+
+### Using the map with the Xiaomi Vacuum Map Card
+
+The map image entity carries a `calibration_points` attribute describing how
+pixels of the served PNG map to the vacuum's millimetre coordinates, in the
+format the [Xiaomi Vacuum Map Card](https://github.com/PiotrMachowski/lovelace-xiaomi-vacuum-map-card)
+reads. The card resolves its map source through the entity's `entity_picture`,
+so the `image` entity can be used directly:
+
+```yaml
+type: custom:xiaomi-vacuum-map-card
+entity: vacuum.<name>
+map_source:
+  camera: image.<name>_map
+calibration_source:
+  camera: true
+vacuum_platform: default
+```
+
+The raw geometry (`origin_x`, `origin_y`, `resolution`, `width`, `height`,
+`scale`, `border`) is exposed as a `calibration` attribute for other consumers.
 
 Selecting a mop mode while no mop pad is attached is refused with a clear
 error message — the vacuum itself silently reverts such changes, so the

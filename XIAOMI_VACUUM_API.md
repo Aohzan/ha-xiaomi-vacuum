@@ -275,7 +275,125 @@ Partition · 6 Set Map Name [8] · 8 Restore Map [6]
 
 ---
 
-## 5. Fault codes and their localized text
+## 5. Spec of `xiaomi.vacuum.ov71gl` (S40 Pro, v1) relative to the X20 Max
+
+Source: `urn:miot-spec-v2:device:vacuum:0000A006:xiaomi-ov71gl:1` (the only
+published revision). The S40 Pro is an export-only product: its spec is not
+served by the Mainland China cloud, so the account must be logged into the
+region that sold the unit (Europe for EU units) for discovery to find it.
+
+Every SIID/PIID/AIID listed in section 4 that this integration reads or invokes
+is identical on the S40 Pro. Differences worth knowing:
+
+| Area | S40 Pro (`ov71gl`) |
+|------|--------------------|
+| `status` (2/2) | adds `22 StationAssistingCleaning`, `23 StationAssistingCleaned`, `24 GoChargeInStationAssistingCleaning` |
+| `sweep-type` (2/5) | adds `8 Appointment`, `9 Linkage`, `10 Fast`, `11 AI Hosting` |
+| Dock | ships with a plain charging dock; the spec still lists `start-dust-arrest` (2/18), `start-mop-wash` (2/19), `stop-mop-wash` (2/31), `stop-dry` (2/32) but there is no `start-dry` (2/20) and no hardware behind them — the integration wires none |
+| Services | no `18 Detergent Management`, no `19 Dust Bag`; adds `16 imu` (calibration action) |
+| Extra properties on SIID 2 | `41 hot-water-mop-wash`, `56 sweep-ai-object`, `63/64 cut-hair-config`, `85-90` cleaning statistics and drying progress, `96 sweep-mop-status`, `97/98` sewage / water tank status, `99 sill`, `100/101` base-station / host water tank status — not read by the integration |
+| Extra actions on SIID 2 | `10 get-zone-configs`, `22 start-call-clean`, `44 stop-cut-hair`, `49-59` station cleaning, skip / final / temporary room and zone cleaning, tank emptying, spot cleaning, `62-64` object clean and station self-cleaning |
+| Zone cleaning | not usable from this integration — see below |
+
+### Zone (rectangle) cleaning is not reproducible on this firmware
+
+Captured from a physical S40 Pro on firmware `4.5.8_0053` while the Mi Home app
+cleaned a rectangle the user drew:
+
+```
+sweep-type  (2/5)  = 2            # Zone
+status      (2/2)  = 4            # Sweeping
+current-cleaning-config (2/40) =
+  {"zones":[[-1139,-380,-1139,-1731,290,-1731,290,-380]],
+   "clean_mode":2,"is_ai_cleaning":false,"dirty_cleaning":false}
+```
+
+So a zone is a **flat array of four corners** in map millimetres, ordered
+left/top, left/bottom, right/bottom, right/top — the same flat convention as
+`fb_point` in the map payload, not an `{x1, y1, x2, y2}` object.
+
+Replaying it does not work. `zone-ids` (2/12) stayed empty for the whole
+cleaning run, so it is not where the app puts the geometry, and
+`start-vacuum-zone-sweep` (2/37) was called with that exact polygon — alone,
+with `clean_mode`, and with `map_uid` — without the robot reacting at all. The
+device answers `code: 0` to every payload including malformed ones, so an
+acknowledgement proves nothing. The same conclusion was reached independently
+on the sibling X20 Pro (`d102gl`), where writing `zone-ids` directly is
+rejected as not writable.
+
+About twenty variants were tried in total and **every one was inert**:
+
+- actions: `start-zone-sweep` (2/37), `set-zone` (2/12) and
+  `temporary-cleaning-zone` (2/55, which takes `common-params` 2/24 instead of
+  `zone-ids`);
+- geometry: the captured polygon as a `{"zones": […]}` object, as a bare
+  nested array, as a comma-separated string, and as a flat list, with and
+  without `clean_mode` and `map_uid`;
+- parameter encoding: both piid-tagged (`[{"piid": 12, "value": …}]`) and
+  bare (`[…]`), since the S20+ room flow uses bare values;
+- sequencing: each start action alone, and `set-zone` followed by
+  `start-zone-sweep`, by `start-custom-sweep` (2/9) and with an empty input.
+
+Only `start-sweep` (2/1) ever reacted, and it simply began an ordinary
+whole-home clean with `sweep-type 1` and no `zones` in the config, i.e. it
+ignored the zone entirely. Beware of that false positive: on this firmware a
+status change alone does not mean the zone was accepted. The check is
+`sweep-type == 2` or a `zones` key in `current-cleaning-config`.
+
+The **cloud** transport was tried next, since that is what the Mi Home app
+uses, and it does discriminate where the local one cannot:
+`temporary-cleaning-zone` (2/55) comes back as `code: -706012015` with
+`exe_time: 0`, i.e. never executed, while `start-zone-sweep` (2/37) returns
+`code: 0` with `exe_time: 10` and a network cost, exactly like a known-good
+`identify` call. The robot really does receive and run the action.
+
+That makes the outcome conclusive, because **the payload is not validated at
+all**: sending the literal string `garbage` on piid 12 returns the same
+`code: 0` / `exe_time: 11` as a well-formed payload. An empty string, a
+`{"zones": []}` object, a deliberately wrong piid, bare zone ids (`1`,
+`1,2`, `[1]`) and a fully-populated payload carrying `map_uid`, `clean_mode`,
+`clean_times`, `fan_level` and `water_level` all behave identically. The
+device accepts anything and cleans nothing, so no response can reveal the
+encoding it wants.
+
+Short of intercepting the Mi Home app's own traffic or decompiling its vacuum
+plugin, zone and spot cleaning cannot be driven from outside the app on this
+firmware. One lead remains untested: the app's saved "custom cleanup" presets
+store the same flat polygon under `mode_data` in `user-define-sweep-cfg`
+(2/42), and `start-user-define-sweep` (2/42) takes the preset id as a string.
+That would replay a preset the user saved in the app rather than an arbitrary
+rectangle.
+
+A **spot clean started from the app is the same mechanism**, just a smaller
+rectangle: a second capture of an app-driven spot clean reported
+`{"zones":[[-1168,25,-1168,-614,-477,-614,-477,25]],"clean_mode":2,…}`, about
+70 cm by 64 cm, again with `sweep-type 2`. So zones and spots share one code
+path on this device, and whatever unlocks one unlocks the other.
+
+### Spot cleaning is published but inert
+
+`spot-cleaning` (2/59) and `start-call-clean` (2/22) both exist on the S40 Pro
+and take no parameters, but neither does anything on firmware `4.5.8_0053`.
+Each was called with the robot charging on its dock and again with the robot
+standing away from it, and the status never left the idle set. As everywhere
+else on this device, the answer was `code: 0`.
+
+That is why the vacuum entity does not advertise
+`VacuumEntityFeature.CLEAN_SPOT`: `vacuum.clean_spot` would report success
+while the robot stayed put. The Mi Home app offers whole-home, per-room,
+drawn-area and furniture cleaning for this model, but no spot or point mode,
+so these two actions look like more of the spec template's unbacked hardware,
+alongside the dock actions.
+
+### Manual driving does work
+
+`enter-remote` (2/28), `remote-control` (2/26, taking `button-type` on piid 39)
+and `exit-remote` (2/29) are honoured: sending press-forward then
+release-forward drives the robot off its dock, and the status moves from
+`2 Charging` to `1 Idle`. The integration does not expose this, but it is
+available for anyone who wants a manual-driving control.
+
+## 6. Fault codes and their localized text
 
 The **Device Fault** property (siid 2 / piid 3) reports a **large, device-specific
 numeric code** (e.g. `210009`), not a small enum. There is **no static code→text table**
