@@ -275,7 +275,27 @@ Partition · 6 Set Map Name [8] · 8 Restore Map [6]
 
 ---
 
-## 5. Fault codes and their localized text
+## 5. Spec of `xiaomi.vacuum.ov71gl` (S40 Pro, v1) relative to the X20 Max
+
+Source: `urn:miot-spec-v2:device:vacuum:0000A006:xiaomi-ov71gl:1` (the only
+published revision). The S40 Pro is an export-only product: its spec is not
+served by the Mainland China cloud, so the account must be logged into the
+region that sold the unit (Europe for EU units) for discovery to find it.
+
+Every SIID/PIID/AIID listed in section 4 that this integration reads or invokes
+is identical on the S40 Pro. Differences worth knowing:
+
+| Area | S40 Pro (`ov71gl`) |
+|------|--------------------|
+| `status` (2/2) | adds `22 StationAssistingCleaning`, `23 StationAssistingCleaned`, `24 GoChargeInStationAssistingCleaning` |
+| `sweep-type` (2/5) | adds `8 Appointment`, `9 Linkage`, `10 Fast`, `11 AI Hosting` |
+| Dock | ships with a plain charging dock; the spec still lists `start-dust-arrest` (2/18), `start-mop-wash` (2/19), `stop-mop-wash` (2/31), `stop-dry` (2/32) but there is no `start-dry` (2/20) and no hardware behind them — the integration wires none |
+| Services | no `18 Detergent Management`, no `19 Dust Bag`; adds `16 imu` (calibration action) |
+| Extra properties on SIID 2 | `41 hot-water-mop-wash`, `56 sweep-ai-object`, `63/64 cut-hair-config`, `85-90` cleaning statistics and drying progress, `96 sweep-mop-status`, `97/98` sewage / water tank status, `99 sill`, `100/101` base-station / host water tank status — not read by the integration |
+| Extra actions on SIID 2 | `10 get-zone-configs`, `22 start-call-clean`, `44 stop-cut-hair`, `49-59` station cleaning, skip / final / temporary room and zone cleaning, tank emptying, spot cleaning, `62-64` object clean and station self-cleaning |
+| Zone cleaning | `zone-ids` (2/12) is the input of both `set-zone` (2/12) and `start-zone-sweep` (2/37), as on the X20 Max. The string format is not published |
+
+## 6. Fault codes and their localized text
 
 The **Device Fault** property (siid 2 / piid 3) reports a **large, device-specific
 numeric code** (e.g. `210009`), not a small enum. There is **no static code→text table**
